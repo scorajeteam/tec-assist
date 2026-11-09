@@ -8,7 +8,9 @@ if(!(Get-Command rc.exe -ErrorAction SilentlyContinue)){throw 'Run in a Visual S
 & rustup toolchain install $lock.rust --profile minimal
 if($LASTEXITCODE -ne 0){throw 'Rust setup failed'}
 $env:RUSTUP_TOOLCHAIN=$lock.rust
-if(!(Test-Path 'C:\Program Files\LLVM\bin\libclang.dll')){
+$clang='C:\Program Files\LLVM\bin\clang.exe'
+$correctLLVM=(Test-Path -LiteralPath $clang) -and ((& $clang --version | Out-String) -match 'version 15\.0\.6\b')
+if(!$correctLLVM){
     & choco install llvm --version=15.0.6 --yes --no-progress --allow-downgrade
     if($LASTEXITCODE -ne 0){throw 'LLVM install failed'}
 }

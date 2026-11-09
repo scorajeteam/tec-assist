@@ -26,11 +26,31 @@ jobs:
         with:
           flutter-version: '3.24.5'
           channel: stable
+      - name: Restore dependency archives
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/AppData/Local/vcpkg/archives
+            ~/.cargo/registry
+            ~/.cargo/git
+            tecassist-deps/vcpkg/downloads
+          key: tecassist-windows2022-rust175-vcpkg120deac-${{ github.run_id }}
+          restore-keys: tecassist-windows2022-rust175-vcpkg120deac-
       - name: Prepare and build unsigned Tec Assist
         shell: pwsh
         run: |
           . ./tecassist/setup.ps1
           ./tecassist/build.ps1
+      - name: Save verified dependency archives
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/AppData/Local/vcpkg/archives
+            ~/.cargo/registry
+            ~/.cargo/git
+            tecassist-deps/vcpkg/downloads
+          key: tecassist-windows2022-rust175-vcpkg120deac-${{ github.run_id }}
       - name: Preserve build, checks and logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

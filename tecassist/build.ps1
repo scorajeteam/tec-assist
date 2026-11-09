@@ -38,6 +38,10 @@ try{
         New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $rel) -Destination $dest -Force
     }
+    # Upstream Windows CMake installs ../../target/release/librustdesk.dll.
+    # Populate that path inside the isolated UI checkout with THIS build's DLL.
+    New-Item -ItemType Directory -Path "$ui\target\release" -Force | Out-Null
+    Copy-Item -LiteralPath "$out\librustdesk.dll" -Destination "$ui\target\release\librustdesk.dll" -Force
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     foreach($mode in @('console','standalone')){
         $overlay=Join-Path $PSScriptRoot "overlays\$mode\flutter"
