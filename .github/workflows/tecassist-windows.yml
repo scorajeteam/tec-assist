@@ -26,6 +26,12 @@ jobs:
         with:
           flutter-version: '3.24.5'
           channel: stable
+      - name: LLVM and Clang 15.0.6
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0
+        with:
+          version: '15.0.6'
+          directory: ${{ runner.temp }}/llvm-15
+          env: false
       - name: Restore dependency archives
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
@@ -39,7 +45,9 @@ jobs:
       - name: Prepare and build unsigned Tec Assist
         shell: pwsh
         run: |
-          . ./tecassist/setup.ps1
+          New-Item -ItemType Directory -Path tecassist-out -Force | Out-Null
+          Start-Transcript -Path tecassist-out/setup.log -Force
+          try { . ./tecassist/setup.ps1 } finally { Stop-Transcript }
           ./tecassist/build.ps1
       - name: Save verified dependency archives
         if: always()

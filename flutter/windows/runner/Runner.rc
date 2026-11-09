@@ -91,12 +91,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Tec Assist" "\0"
             VALUE "FileDescription", "Tec Assist - anteprima" "\0"
-            VALUE "FileVersion", VERSION_AS_STRING "\0"
+            VALUE "FileVersion", "1.4.4.25" "\0"
             VALUE "InternalName", "TecAssist" "\0"
             VALUE "LegalCopyright", "Copyright © 2025 Purslane Ltd. All rights reserved." "\0"
             VALUE "OriginalFilename", "TecAssist.exe" "\0"
             VALUE "ProductName", "Tec Assist" "\0"
-            VALUE "ProductVersion", VERSION_AS_STRING "\0"
+            VALUE "ProductVersion", "1.4.4.25" "\0"
         END
     END
     BLOCK "VarFileInfo"

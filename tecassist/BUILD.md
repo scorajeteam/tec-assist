@@ -1,6 +1,6 @@
 # Build Windows x64 della 1.4.4.25
 
-La compilazione usa i sorgenti di questo ramo, Rust 1.75.0, Flutter 3.24.5 e vcpkg alla revisione fissata in `source-lock.json`. Richiede Visual Studio 2022 C++ Build Tools e Windows SDK (linker, resource compiler). Il workflow `Tec Assist Windows` usa un runner Windows 2022 pubblico GitHub, senza segreti e senza pubblicazione automatica sul sito o nelle release.
+La compilazione usa i sorgenti di questo ramo, Rust 1.75.0, Flutter 3.24.5, LLVM 15.0.6 e vcpkg alla revisione fissata in `source-lock.json`. Richiede Visual Studio 2022 C++ Build Tools e Windows SDK (linker, resource compiler). Il workflow `Tec Assist Windows` installa LLVM con un'azione fissata alla revisione e usa un runner Windows 2022 pubblico GitHub, senza segreti e senza pubblicazione automatica sul sito o nelle release. Per l'uso locale installare LLVM 15.0.6 dai binari ufficiali e impostare `LLVM_PATH` alla sua cartella.
 
 ## Comandi
 
