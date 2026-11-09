@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/tec_assist_brand.dart';
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -632,7 +633,7 @@ class _DesktopTabState extends State<DesktopTab>
                           width: 78,
                         )),
                     Offstage(
-                      offstage: kUseCompatibleUiMode || isMacOS,
+                      offstage: isMacOS,
                       child: Row(children: [
                         Offstage(
                           offstage: !showLogo,
@@ -641,7 +642,7 @@ class _DesktopTabState extends State<DesktopTab>
                         Offstage(
                             offstage: !showTitle,
                             child: const Text(
-                              "RustDesk",
+                              tecAssistWindowTitle,
                               style: TextStyle(fontSize: 13),
                             ).marginOnly(left: 2))
                       ]).marginOnly(

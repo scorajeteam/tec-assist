@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/tec_assist_brand.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -22,6 +23,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 
 import 'common.dart';
 import 'consts.dart';
@@ -171,9 +173,22 @@ void runMainApp(bool startService) async {
       rustDeskWinManager.registerActiveWindow(kWindowMainId);
     }
     windowManager.setOpacity(1);
-    windowManager.setTitle(getWindowName());
+    windowManager.setTitle(tecAssistWindowTitle);
     // Do not use `windowManager.setResizable()` here.
-    setResizable(!bind.isIncomingOnly());
+    setResizable(true);
+    if (tecAssistStandalone) {
+      final display = await screenRetriever.getPrimaryDisplay();
+      final area = display.visibleSize ?? display.size;
+      final origin = display.visiblePosition ?? Offset.zero;
+      final width = (area.width - 24).clamp(280.0, 480.0).toDouble();
+      final height = (area.height - 24).clamp(360.0, 650.0).toDouble();
+      await windowManager.setMinimumSize(Size(width < 420 ? width : 420, height < 560 ? height : 560));
+      await windowManager.setSize(Size(width, height));
+      await windowManager.setPosition(Offset(origin.dx + (area.width - width) / 2, origin.dy + (area.height - height) / 2));
+    } else {
+      await windowManager.setMinimumSize(const Size(900, 640));
+      await windowManager.setSize(const Size(1120, 740));
+    }
   });
 }
 
@@ -300,7 +315,8 @@ void runConnectionManagerScreen() async {
   } else {
     await showCmWindow(isStartup: true);
   }
-  setResizable(false);
+  setResizable(tecAssistStandalone);
+  if (tecAssistStandalone) await windowManager.setMinimumSize(const Size(300, 360));
   // Start the uni links handler and redirect links to Native, not for Flutter.
   listenUniLinks(handleByFlutter: false);
 }

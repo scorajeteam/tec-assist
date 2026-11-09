@@ -219,6 +219,11 @@ pub struct Connection {
     port_forward_address: String,
     tx_to_cm: mpsc::UnboundedSender<ipc::Data>,
     authorized: bool,
+    tec_assist_consent: crate::tec_assist_consent::ConsentGate,
+    tec_assist_reboot_pending: bool,
+    tec_assist_transfer_deadline: u64,
+    tec_assist_inherited_files: bool,
+    tec_assist_reboot_ticket: Option<String>,
     require_2fa: Option<totp_rs::TOTP>,
     keyboard: bool,
     clipboard: bool,
@@ -282,6 +287,8 @@ pub struct Connection {
     follow_remote_cursor: bool,
     follow_remote_window: bool,
     multi_ui_session: bool,
+    #[cfg(windows)]
+    tec_assist_elevation_pending: Option<portable_client::StartPara>,
     tx_from_authed: mpsc::UnboundedSender<ipc::Data>,
     printer_data: Vec<(Instant, String, Vec<u8>)>,
     // For post requests that need to be sent sequentially.
@@ -397,6 +404,11 @@ impl Connection {
             port_forward_address: "".to_owned(),
             tx_to_cm,
             authorized: false,
+            tec_assist_consent: Default::default(),
+            tec_assist_reboot_pending: false,
+            tec_assist_transfer_deadline: 0,
+            tec_assist_inherited_files: false,
+            tec_assist_reboot_ticket: None,
             keyboard: Connection::permission("enable-keyboard"),
             clipboard: Connection::permission("enable-clipboard"),
             audio: Connection::permission("enable-audio"),
@@ -456,6 +468,8 @@ impl Connection {
             delayed_read_dir: None,
             #[cfg(target_os = "macos")]
             retina: Retina::default(),
+            #[cfg(windows)]
+            tec_assist_elevation_pending: None,
             tx_from_authed,
             printer_data: Vec::new(),
             tx_post_seq,
@@ -544,13 +558,34 @@ impl Connection {
                 Some(data) = rx_from_cm.recv() => {
                     match data {
                         ipc::Data::Authorize => {
-                            conn.require_2fa.take();
+                            #[cfg(windows)] let files_selected=crate::get_app_name()=="TecAssistStandalone"
+                                && conn.tec_assist_consent.password_verified() && conn.stream.is_secured()
+                                && !conn.authorized && conn.is_remote() && conn.file
+                                && !crate::tec_assist_resume::host()
+                                && crate::tec_assist_resume::confirm_files(&conn.lr.my_id);
+                            if crate::get_app_name() == "TecAssistStandalone" {
+                                if !conn.tec_assist_consent.approve() { continue; }
+                            } else {
+                                conn.require_2fa.take();
+                            }
                             conn.send_logon_response().await;
+                            #[cfg(windows)] if files_selected && conn.authorized && conn.stream.is_secured()
+                                && conn.file && conn.is_remote() && !crate::tec_assist_resume::host()
+                                && crate::get_app_name()=="TecAssistStandalone" {
+                                if let Some((deadline,json))=crate::tec_assist_resume::issue_files(&conn.lr, [conn.keyboard,conn.clipboard,conn.audio,conn.file,conn.restart,conn.recording,conn.block_input]) {
+                                    conn.tec_assist_transfer_deadline=deadline;
+                                    let mut misc=Misc::new();misc.set_tec_assist_resume(format!("files25:{json}"));
+                                    let mut msg=Message::new();msg.set_misc(misc);conn.send(msg).await;
+                                }
+                            }
                             if conn.port_forward_socket.is_some() {
                                 break;
                             }
                         }
                         ipc::Data::Close => {
+                            #[cfg(windows)] if crate::tec_assist_resume::host() { let _=crate::tec_assist_resume::revoke(); }
+                            #[cfg(windows)] crate::tec_assist_resume::revoke_files(&conn.lr.my_id,conn.lr.session_id);
+                            conn.tec_assist_transfer_deadline=0;
                             conn.chat_unanswered = false; // seen
                             conn.file_transferred = false; //seen
                             conn.send_close_reason_no_retry("").await;
@@ -622,6 +657,11 @@ impl Connection {
                                 }
                             } else if &name == "file" {
                                 conn.file = enabled;
+                                #[cfg(windows)] if !enabled {
+                                    conn.tec_assist_transfer_deadline=0;
+                                    crate::tec_assist_resume::revoke_files(&conn.lr.my_id,conn.lr.session_id);
+                                    if crate::tec_assist_resume::host(){let _=crate::tec_assist_resume::revoke();}
+                                }
                                 conn.send_permission(Permission::File, enabled).await;
                                 #[cfg(feature = "unix-file-copy-paste")]
                                 if !enabled {
@@ -848,6 +888,20 @@ impl Connection {
                 },
                 Some(data) = rx_from_authed.recv() => {
                     match data {
+                        #[cfg(windows)]
+                        ipc::Data::TecAssistRebootPrepared(result) => {
+                            if conn.authorized && conn.stream.is_secured() {
+                                if serde_json::from_str::<crate::tec_assist_resume::Ticket>(&result).is_ok() {
+                                    conn.tec_assist_reboot_ticket = Some(result.clone());
+                                } else { conn.tec_assist_reboot_pending = false; }
+                                let mut misc = Misc::new(); misc.set_tec_assist_resume(result);
+                                let mut msg = Message::new(); msg.set_misc(misc); conn.send(msg).await;
+                            }
+                        }
+                        #[cfg(windows)]
+                        ipc::Data::TecAssistElevationDecision(approved) => {
+                            conn.tec_assist_finish_elevation(approved).await;
+                        }
                         #[cfg(all(target_os = "windows", feature = "flutter"))]
                         ipc::Data::PrinterData(data) => {
                             if config::Config::get_bool_option(config::keys::OPTION_ENABLE_REMOTE_PRINTER) {
@@ -874,6 +928,9 @@ impl Connection {
                     conn.update_supported_encoding();
                 }
                 _ = test_delay_timer.tick() => {
+                    #[cfg(windows)] if conn.tec_assist_inherited_files && !crate::tec_assist_resume::files_alive(&conn.lr) {
+                        conn.on_close("Autorizzazione trasferimento scaduta o revocata", true).await;break;
+                    }
                     if last_recv_time.elapsed() >= SEC30 {
                         conn.on_close("Timeout", true).await;
                         break;
@@ -927,7 +984,10 @@ impl Connection {
             conn.lr.my_id.clone(),
         );
         video_service::notify_video_frame_fetched_by_conn_id(id, None);
-        if conn.authorized {
+        // A Standalone assistance instance keeps its temporary password through
+        // transport reconnects and UAC. A fresh process generates a fresh password.
+        // Explicit user-requested password regeneration remains available.
+        if conn.authorized && crate::get_app_name() != "TecAssistStandalone" {
             password::update_temporary_password();
         }
         if let Err(err) = conn.try_port_forward_loop(&mut rx_from_cm).await {
@@ -1296,6 +1356,14 @@ impl Connection {
         if self.authorized {
             return;
         }
+        if crate::get_app_name() == "TecAssistStandalone"
+            && !self.tec_assist_consent.is_authorized()
+        {
+            if self.tec_assist_consent.password_verified() {
+                self.send_login_error(crate::client::LOGIN_MSG_NO_PASSWORD_ACCESS).await;
+            }
+            return;
+        }
         if self.require_2fa.is_some() && !self.is_recent_session(true) && !self.from_switch {
             self.require_2fa.as_ref().map(|totp| {
                 let bot = crate::auth_2fa::TelegramBot::get();
@@ -1328,6 +1396,7 @@ impl Connection {
             return;
         }
         self.authorized = true;
+        #[cfg(windows)] crate::tec_assist_resume::stage("server-desktop-authorized");
         let (conn_type, auth_conn_type) = if self.file_transfer.is_some() {
             (1, AuthConnType::FileTransfer)
         } else if self.port_forward_socket.is_some() {
@@ -1498,6 +1567,7 @@ impl Connection {
         pi.sas_enabled = sas_enabled;
         pi.features = Some(Features {
             privacy_mode: privacy_mode::is_privacy_mode_supported(),
+            #[cfg(windows)] tec_assist_resume: crate::get_app_name() == "TecAssistStandalone" && !crate::tec_assist_resume::host(),
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             terminal,
             ..Default::default()
@@ -1547,6 +1617,7 @@ impl Connection {
 
             try_activate_screen();
 
+            #[cfg(windows)] crate::tec_assist_resume::stage("server-displays-query-begin");
             match super::display_service::update_get_sync_displays_on_login().await {
                 Err(err) => {
                     res.set_error(format!("{}", err));
@@ -1584,6 +1655,7 @@ impl Connection {
                     }
                 }
             }
+            #[cfg(windows)] crate::tec_assist_resume::stage("server-displays-query-end");
             self.on_remote_authorized();
         }
         let mut msg_out = Message::new();
@@ -1752,6 +1824,13 @@ impl Connection {
     }
 
     fn try_start_cm(&mut self, peer_id: String, name: String, authorized: bool) {
+        // Do not show a consent request until the temporary password is verified.
+        if crate::get_app_name() == "TecAssistStandalone"
+            && !self.tec_assist_consent.password_verified()
+        { return; }
+        // The first Login is queued together with manager startup, not seconds later.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        self.try_start_cm_ipc();
         self.send_to_cm(ipc::Data::Login {
             id: self.inner.id(),
             is_file_transfer: self.file_transfer.is_some(),
@@ -1865,9 +1944,40 @@ impl Connection {
     }
 
     fn validate_password(&mut self) -> bool {
+        #[cfg(windows)] if crate::get_app_name()=="TecAssistStandalone" && self.file_transfer.is_some()
+            && self.port_forward_socket.is_none() && !self.view_camera && !self.terminal
+            && !self.lr.tec_assist_resume_proof.is_empty() {
+            self.tec_assist_consent.password_checked(false);
+            if !self.file || !self.stream.is_secured() { return false; }
+            if let Some(t)=crate::tec_assist_resume::accept_files(&self.lr,&self.hash) {
+                self.keyboard &= t.permissions[0];self.clipboard &= t.permissions[1];
+                self.audio &= t.permissions[2];self.file &= t.permissions[3];
+                self.restart &= t.permissions[4];self.recording &= t.permissions[5];self.block_input &= t.permissions[6];
+                self.tec_assist_inherited_files=true;
+                self.tec_assist_consent.password_checked(true);self.tec_assist_consent.approve();return true;
+            }
+            return false;
+        }
+        #[cfg(windows)] if crate::tec_assist_resume::host() {
+            self.tec_assist_consent.password_checked(false);
+            let desktop = self.file_transfer.is_none() && self.port_forward_socket.is_none() && !self.view_camera && !self.terminal;
+            if self.stream.is_secured() && crate::tec_assist_resume::accept_proof(&self.lr, &self.hash, desktop) {
+                if let Some(t) = crate::tec_assist_resume::read_ticket() {
+                    self.keyboard &= t.permissions[0]; self.clipboard &= t.permissions[1];
+                    self.audio &= t.permissions[2]; self.file &= t.permissions[3];
+                    self.restart &= t.permissions[4]; self.recording &= t.permissions[5];
+                    self.block_input &= t.permissions[6];
+                } else { return false; }
+                self.tec_assist_consent.password_checked(true);
+                self.tec_assist_consent.approve(); return true;
+            }
+            return false;
+        }
+        self.tec_assist_consent.password_checked(false);
         if password::temporary_enabled() {
             let password = password::temporary_password();
             if self.validate_one_password(password.clone()) {
+                self.tec_assist_consent.password_checked(true);
                 raii::AuthedConnID::update_or_insert_session(
                     self.session_key(),
                     Some(password),
@@ -1885,6 +1995,7 @@ impl Connection {
     }
 
     fn is_recent_session(&mut self, tfa: bool) -> bool {
+        if crate::get_app_name() == "TecAssistStandalone" { return false; }
         SESSIONS
             .lock()
             .unwrap()
@@ -1969,6 +2080,11 @@ impl Connection {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn try_start_cm_ipc(&mut self) {
+        // Avoid launching an empty manager, which closes after six seconds.
+        // Keep the pending IPC parameters until the password has been verified.
+        if crate::get_app_name() == "TecAssistStandalone"
+            && !self.tec_assist_consent.may_start_manager()
+        { return; }
         if let Some(p) = self.start_cm_ipc_para.take() {
             tokio::spawn(async move {
                 #[cfg(windows)]
@@ -2013,6 +2129,24 @@ impl Connection {
         }
         // After handling CloseReason messages, proceed to process other message types
         if let Some(message::Union::LoginRequest(lr)) = msg.union {
+            #[cfg(windows)] {
+                let host=crate::tec_assist_resume::host();
+                if lr.tec_assist_resume_probe {
+                    crate::tec_assist_resume::stage("server-probe-received");
+                    let ready=host && self.stream.is_secured() && crate::tec_assist_resume::accept_proof(&lr,&self.hash,lr.union.is_none());
+                    crate::tec_assist_resume::stage(if ready {"server-probe-verified"} else {"server-probe-rejected"});
+                    self.send_login_error(if ready {"TEC_ASSIST_RESUME_READY"} else if host {"TEC_ASSIST_RESUME_DENIED"} else {"TEC_ASSIST_RESUME_WAIT"}).await;
+                    crate::tec_assist_resume::stage("server-probe-response-sent");
+                    // A readiness probe must never authorize or start the connection manager.
+                    return true;
+                }
+                if host && lr.tec_assist_resume_proof.is_empty() {
+                    self.send_login_error("TEC_ASSIST_RESUME_TICKET_REQUIRED").await; return true;
+                }
+                if !host && !lr.tec_assist_resume_proof.is_empty() && !lr.has_file_transfer() {
+                    self.send_login_error("TEC_ASSIST_RESUME_ENDED").await; return true;
+                }
+            }
             self.handle_login_request_without_validation(&lr).await;
             if self.authorized {
                 return true;
@@ -2305,7 +2439,13 @@ impl Connection {
                 }
             }
         } else if self.authorized {
+            #[cfg(windows)] if self.tec_assist_inherited_files && !crate::tec_assist_resume::files_alive(&self.lr) {return false;}
             if self.port_forward_socket.is_some() {
+                return true;
+            }
+            // Other remote sessions cannot click/type into the local approval dialog.
+            if crate::tec_assist_elevation::pending() && matches!(&msg.union,
+                Some(message::Union::MouseEvent(_)) | Some(message::Union::PointerDeviceEvent(_)) | Some(message::Union::KeyEvent(_))) {
                 return true;
             }
             match msg.union {
@@ -2916,7 +3056,34 @@ impl Connection {
                             Some(Instant::now().into()),
                         );
                     }
+                    #[cfg(windows)]
+                    Some(misc::Union::TecAssistResume(command)) => {
+                        if command == "commit" && self.authorized && self.restart && self.stream.is_secured() {
+                            if let Some(ticket) = self.tec_assist_reboot_ticket.take() {
+                                let valid = serde_json::from_str::<crate::tec_assist_resume::Ticket>(&ticket)
+                                    .map(|t| crate::tec_assist_resume::now() < t.expires_at && t.permissions == [self.keyboard,self.clipboard,self.audio,self.file,self.restart,self.recording,self.block_input]).unwrap_or(false);
+                                if valid { if let Err(error) = crate::tec_assist_resume::commit() {
+                                    let mut misc = Misc::new(); misc.set_tec_assist_resume(format!("error:{error}"));
+                                    let mut msg = Message::new(); msg.set_misc(misc); self.send(msg).await;
+                                }}
+                            }
+                        }
+                    }
                     Some(misc::Union::RestartRemoteDevice(_)) => {
+                        #[cfg(windows)] if crate::get_app_name() == "TecAssistStandalone" {
+                            if self.authorized && self.restart && self.stream.is_secured() && !self.tec_assist_reboot_pending {
+                                self.tec_assist_reboot_pending = true;
+                                let peer = self.lr.my_id.clone(); let session = self.lr.session_id;
+                                let permissions = [self.keyboard,self.clipboard,self.audio,self.file,self.restart,self.recording,self.block_input];
+                                let transfer_expires_at=self.tec_assist_transfer_deadline;
+                                let tx = self.tx_from_authed.clone();
+                                hbb_common::tokio::task::spawn_blocking(move || {
+                                    let result = crate::tec_assist_resume::prepare(peer, session, permissions, transfer_expires_at).unwrap_or_else(|e|format!("error:{e}"));
+                                    let _ = tx.send(ipc::Data::TecAssistRebootPrepared(result));
+                                });
+                            }
+                            return true;
+                        }
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         if self.restart {
                             // force_reboot, not work on linux vm and macos 14
@@ -3406,25 +3573,60 @@ impl Connection {
     }
 
     #[cfg(windows)]
-    async fn handle_elevation_request(&mut self, para: portable_client::StartPara) {
-        let mut err;
-        if !self.keyboard {
-            err = "No permission".to_string();
-        } else {
-            err = "No need to elevate".to_string();
-            if !crate::platform::is_installed() && !portable_client::running() {
-                err = portable_client::start_portable_service(para)
-                    .err()
-                    .map_or("".to_string(), |e| e.to_string());
-            }
-        }
-
+    async fn tec_assist_elevation_response(&mut self, err: String) {
         let mut misc = Misc::new();
         misc.set_elevation_response(err);
         let mut msg = Message::new();
         msg.set_misc(misc);
         self.send(msg).await;
         self.update_auto_disconnect_timer();
+    }
+
+    #[cfg(windows)]
+    async fn tec_assist_finish_elevation(&mut self, approved: bool) {
+        // Only a still-live Connection can consume this result. The prompt worker
+        // never elevates, and a result after disconnect has no receiver.
+        if let Some(para) = self.tec_assist_elevation_pending.take() {
+            let err = if !approved {
+                "Il cliente non ha autorizzato la richiesta di privilegi.".to_owned()
+            } else if !self.authorized || !self.keyboard {
+                "La connessione non e piu autorizzata a richiedere privilegi.".to_owned()
+            } else if crate::platform::is_installed() || portable_client::running() {
+                "No need to elevate".to_owned()
+            } else {
+                portable_client::start_portable_service(para).err().map_or(String::new(), |e| e.to_string())
+            };
+            self.tec_assist_elevation_response(err).await;
+        }
+    }
+
+    #[cfg(windows)]
+    async fn handle_elevation_request(&mut self, para: portable_client::StartPara) {
+        if !self.keyboard || !self.authorized {
+            self.tec_assist_elevation_response("No permission".to_owned()).await;
+            return;
+        }
+        if crate::platform::is_installed() || portable_client::running() {
+            self.tec_assist_elevation_response("No need to elevate".to_owned()).await;
+            return;
+        }
+        if crate::get_app_name() == "TecAssistStandalone" {
+            if self.tec_assist_elevation_pending.is_none() {
+                self.tec_assist_elevation_pending = Some(para);
+                let peer_id = self.lr.my_id.clone();
+                let tx = self.tx_from_authed.clone();
+                hbb_common::tokio::task::spawn_blocking(move || {
+                    let approved = crate::tec_assist_elevation::confirm(&peer_id);
+                    let _ = tx.send(ipc::Data::TecAssistElevationDecision(approved));
+                });
+            }
+            // Waiting state only, not a report of successful elevation. The
+            // connection loop continues to handle heartbeat, video and disconnect.
+            self.tec_assist_elevation_response(String::new()).await;
+            return;
+        }
+        let err = portable_client::start_portable_service(para).err().map_or(String::new(), |e| e.to_string());
+        self.tec_assist_elevation_response(err).await;
     }
 
     async fn capture_displays(&mut self, add: &[usize], sub: &[usize], set: &[usize]) {
@@ -3968,6 +4170,9 @@ impl Connection {
     }
 
     async fn on_close(&mut self, reason: &str, lock: bool) {
+        #[cfg(windows)] if self.is_remote() {
+            crate::tec_assist_resume::revoke_files(&self.lr.my_id,self.lr.session_id);
+        }
         if self.closed {
             return;
         }
@@ -4812,6 +5017,7 @@ impl Retina {
 }
 
 pub struct AuthedConn {
+    pub peer_name: String,
     pub conn_id: i32,
     pub conn_type: AuthConnType,
     pub session_key: SessionKey,
@@ -4854,6 +5060,7 @@ mod raii {
                 && crate::is_support_remote_print(&lr.version)
                 && lr.my_platform == hbb_common::whoami::Platform::Windows.to_string();
             AUTHED_CONNS.lock().unwrap().push(AuthedConn {
+                peer_name: lr.my_name.clone(),
                 conn_id,
                 conn_type,
                 session_key,

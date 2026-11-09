@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter_hbb/tec_assist_operator.dart';
+import 'package:flutter_hbb/tec_assist_brand.dart';
 import 'dart:convert';
 import 'dart:math';
 
@@ -250,7 +252,7 @@ class MyTheme {
   MyTheme._();
 
   static const Color grayBg = Color(0xFFEFEFF2);
-  static const Color accent = Color(0xFF0071FF);
+  static const Color accent = Color(0xFF1565C0);
   static const Color accent50 = Color(0x770071FF);
   static const Color accent80 = Color(0xAA0071FF);
   static const Color canvasColor = Color(0xFF212121);
@@ -453,7 +455,7 @@ class MyTheme {
         style:
             MenuStyle(backgroundColor: MaterialStatePropertyAll(Colors.white))),
     colorScheme: ColorScheme.light(
-        primary: Colors.blue, secondary: accent, background: grayBg),
+        primary: const Color(0xFF1565C0), secondary: accent, background: grayBg),
     popupMenuTheme: PopupMenuThemeData(
         color: Colors.white,
         shape: RoundedRectangleBorder(
@@ -561,7 +563,7 @@ class MyTheme {
         style: MenuStyle(
             backgroundColor: MaterialStatePropertyAll(Color(0xFF121212)))),
     colorScheme: ColorScheme.dark(
-      primary: Colors.blue,
+      primary: const Color(0xFF1565C0),
       secondary: accent,
       background: Color(0xFF24252B),
     ),
@@ -2511,6 +2513,7 @@ connect(BuildContext context, String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
+  if (!tecAssistStandalone && !await tecAssistEnsureOperator(context)) return;
   if (!isDesktop || desktopType == DesktopType.main) {
     try {
       if (Get.isRegistered<IDTextEditingController>()) {
@@ -3636,7 +3639,7 @@ Widget loadLogo() {
 }
 
 Widget loadIcon(double size) {
-  return Image.asset('assets/icon.png',
+  return Image.asset('assets/tec_assist_logo.png',
       width: size,
       height: size,
       errorBuilder: (ctx, error, stackTrace) => SvgPicture.asset(

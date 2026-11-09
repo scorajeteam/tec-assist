@@ -25,6 +25,7 @@ const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
 
 class ServerModel with ChangeNotifier {
+  List<String> tecAssistConnectedNames = [];
   bool _isStart = false; // Android MainService status
   bool _mediaOk = false;
   bool _inputOk = false;
@@ -149,6 +150,11 @@ class ServerModel with ChangeNotifier {
     timerCallback() async {
       final connectionStatus =
           jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
+      final names = (connectionStatus['tec_assist_connected'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+      if (jsonEncode(names) != jsonEncode(tecAssistConnectedNames)) {
+        tecAssistConnectedNames = names;
+        notifyListeners();
+      }
       final statusNum = connectionStatus['status_num'] as int;
       if (statusNum != _connectStatus) {
         _connectStatus = statusNum;

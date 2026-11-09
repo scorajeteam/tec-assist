@@ -1,0 +1,17 @@
+{
+  "tecAssistVersion": "1.4.4.25",
+  "rustdeskCommit": "7d06de00fb29fcc2cfc93a722a1fe506923b1f74",
+  "hbbCommonCommit": "a86eda749e6fa33c282bab680e6b504d3ad87539",
+  "hbbCommonSource": "https://github.com/rustdesk/hbb_common",
+  "hbbCommonVendored": true,
+  "rust": "1.75.0",
+  "flutter": "3.24.5",
+  "vcpkgCommit": "120deac3062162151622ca4860575a33844ba10b",
+  "engineUrl": "https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip",
+  "engineSha256": "EC8CABF36EE4FF24C8D98DE25B00E70781EB03876265AEE84D0FE554A110036E",
+  "engineHashEvidence": "SHA256 of official HTTPS download recorded on development machine; not an independently published vendor digest",
+  "bridgeGenerator": "flutter_rust_bridge_codegen 1.80.1 (uuid feature)",
+  "generatedBridgeCheckedIn": true,
+  "signed": false,
+  "signPathApplicationSubmitted": false
+}

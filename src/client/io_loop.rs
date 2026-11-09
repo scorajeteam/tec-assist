@@ -1314,12 +1314,30 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 Some(message::Union::Hash(hash)) => {
+                    #[cfg(windows)] crate::tec_assist_resume::stage("client-hash-received");
                     self.handler
                         .handle_hash(&self.handler.password.clone(), hash, peer)
                         .await;
+                    #[cfg(windows)] crate::tec_assist_resume::stage("client-hash-handled");
                 }
                 Some(message::Union::LoginResponse(lr)) => match lr.union {
                     Some(login_response::Union::Error(err)) => {
+                        #[cfg(windows)] if err.starts_with("TEC_ASSIST_RESUME_") {
+                            if !peer.is_secured(){self.handler.msgbox("error","Tec Assist","Connessione di ripresa non protetta.","");return false;}
+                            if err=="TEC_ASSIST_RESUME_READY" {
+                                crate::tec_assist_resume::stage("client-ready-received");
+                                self.handler.lc.write().unwrap().tec_assist_probe_complete=true;
+                                self.handler.lc.write().unwrap().restarting_remote_device=false;
+                                self.handler.msgbox("tec-assist-resume-ready","PC2 è pronto","Il computer remoto è tornato online.","");
+                            }else if err=="TEC_ASSIST_RESUME_WAIT" {
+                                self.handler.msgbox("tec-assist-resume-wait","Riavvio in corso","Attendo che il PC2 sia pronto.","");
+                            }else {
+                                crate::tec_assist_resume::forget(&self.handler.get_id());
+                                self.handler.lc.write().unwrap().restarting_remote_device=false;
+                                self.handler.msgbox("tec-assist-resume-ended","Ripresa non disponibile","L'autorizzazione temporanea è terminata o non appartiene a questa Console. Avvia una nuova assistenza con il cliente.","");
+                            }
+                            return true;
+                        }
                         if err == client::REQUIRE_2FA {
                             self.handler.lc.write().unwrap().enable_trusted_devices =
                                 lr.enable_trusted_devices;
@@ -1847,6 +1865,23 @@ impl<T: InvokeUiSession> Remote<T> {
                                     msgtype, title, text, link,
                                 ));
                             }
+                        }
+                    }
+                    #[cfg(windows)]
+                    Some(misc::Union::TecAssistResume(ticket)) => {
+                        let session = self.handler.lc.read().unwrap().session_id;
+                        if let Some(json)=ticket.strip_prefix("files25:") {
+                            if peer.is_secured() { crate::tec_assist_resume::remember_files(&self.handler.get_id(),session,json); }
+                            return true;
+                        }
+                        if peer.is_secured() && crate::tec_assist_resume::remember(&self.handler.get_id(), session, &ticket) {
+                            self.handler.msgbox("tec-assist-reboot-prepared","Tec Assist","Riavvio preparato.","");
+                            let mut misc = Misc::new(); misc.set_tec_assist_resume("commit".into());
+                            let mut msg = Message::new(); msg.set_misc(misc); let _ = peer.send(&msg).await;
+                        } else {
+                            self.handler.lc.write().unwrap().restarting_remote_device = false;
+                            let message = ticket.strip_prefix("error:").unwrap_or("Risposta di ripresa non valida: riavvio non eseguito.");
+                            self.handler.msgbox("error", "Tec Assist â€” Riavvio", message, "");
                         }
                     }
                     Some(misc::Union::ElevationResponse(err)) => {

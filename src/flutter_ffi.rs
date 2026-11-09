@@ -1072,7 +1072,14 @@ pub fn main_get_lan_peers() -> String {
 pub fn main_get_connect_status() -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        serde_json::to_string(&get_connect_status()).unwrap_or("".to_string())
+        let mut status = serde_json::to_value(get_connect_status()).unwrap_or_default();
+        if crate::get_app_name() == "TecAssistStandalone" {
+            let names: Vec<String> = crate::server::AUTHED_CONNS.lock().unwrap().iter()
+                .filter(|c| c.conn_type == crate::server::AuthConnType::Remote)
+                .map(|c| c.peer_name.clone()).collect();
+            status["tec_assist_connected"] = serde_json::json!(names);
+        }
+        status.to_string()
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -2875,4 +2882,56 @@ pub mod server_side {
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
     }
+}
+
+// Tec Assist: local, explicit UAC request. No credentials or persistent service.
+pub fn tec_assist_request_elevation() -> String {
+    #[cfg(windows)]
+    {
+        use crate::portable_service::client;
+        if crate::platform::is_installed() {
+            return "error: E presente un'installazione RustDesk. Verificare l'isolamento prima dell'elevazione portable.".to_owned();
+        }
+        if client::running() {
+            return "active".to_owned();
+        }
+        match client::start_portable_service(client::StartPara::Direct) {
+            Ok(()) => "requested".to_owned(),
+            Err(error) => format!("error: {}", error),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        "error: Funzione disponibile soltanto su Windows.".to_owned()
+    }
+}
+
+pub fn tec_assist_elevation_active() -> SyncReturn<bool> {
+    #[cfg(windows)]
+    {
+        SyncReturn(crate::portable_service::client::running())
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(false)
+    }
+}
+// End only this isolated portable Standalone process; never stop another app/service.
+pub fn tec_assist_end_assistance() -> String {
+    #[cfg(windows)] if crate::get_app_name() == "TecAssistStandalone" {
+        crate::tec_assist_resume::cancel_pending();
+        if let Err(e)=crate::tec_assist_resume::revoke() { return format!("error: {e}"); }
+    }
+    if crate::get_app_name() != "TecAssistStandalone" {
+        return "error: Comando disponibile solo nello Standalone isolato.".to_owned();
+    }
+    #[cfg(windows)]
+    if crate::platform::is_installed() {
+        return "error: Modalita installata non prevista: arresto non eseguito.".to_owned();
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::process::exit(0);
+    });
+    "closing".to_owned()
 }

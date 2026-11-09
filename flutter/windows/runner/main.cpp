@@ -72,8 +72,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     }
   }
 
+  // Main-window titles are intentionally separate from the internal config identity.
+  const std::wstring tec_assist_main_title =
+      app_name == L"TecAssistConsole" ? L"Console" : L"Standalone";
+
   // Uri links dispatch
-  HWND hwnd = ::FindWindowW(getWindowClassName(), app_name.c_str());
+  HWND hwnd = ::FindWindowW(getWindowClassName(), tec_assist_main_title.c_str());
   if (hwnd != NULL) {
     // Allow multiple flutter instances when being executed by parameters
     // contained in whitelists.
@@ -145,11 +149,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::wstring window_title;
   if (is_cm_page) {
-    window_title = app_name + L" - Connection Manager";
+    window_title = app_name == L"TecAssistStandalone" ? L"Richiesta assistenza" : app_name + L" - Connection Manager";
   } else if (is_install_page) {
     window_title = app_name + L" - Install";
   } else {
-    window_title = app_name;
+    window_title = tec_assist_main_title;
   }
   if (!window.CreateAndShow(window_title, origin, size, !is_cm_page)) {
       return EXIT_FAILURE;

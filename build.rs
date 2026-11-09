@@ -78,6 +78,14 @@ fn install_android_deps() {
 }
 
 fn main() {
+    #[cfg(windows)] {
+        let res=std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("tecassist-version.res");
+        let ok=std::process::Command::new("rc.exe").arg("/nologo").arg("/fo").arg(&res).arg("tecassist/native-version.rc").status().expect("Windows SDK resource compiler required");
+        assert!(ok.success(),"Tec Assist version resource failed");
+        println!("cargo:rustc-cdylib-link-arg={}",res.display());
+        println!("cargo:rerun-if-changed=tecassist/native-version.rc");
+    }
+
     hbb_common::gen_version();
     install_android_deps();
     #[cfg(all(windows, feature = "inline"))]

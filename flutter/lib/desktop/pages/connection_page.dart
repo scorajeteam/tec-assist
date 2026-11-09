@@ -22,10 +22,11 @@ import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
 
 class OnlineStatusWidget extends StatefulWidget {
-  const OnlineStatusWidget({Key? key, this.onSvcStatusChanged})
+  const OnlineStatusWidget({Key? key, this.onSvcStatusChanged, this.foregroundColor})
       : super(key: key);
 
   final VoidCallback? onSvcStatusChanged;
+  final Color? foregroundColor;
 
   @override
   State<OnlineStatusWidget> createState() => _OnlineStatusWidgetState();
@@ -163,7 +164,7 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
               : stateGlobal.svcStatus.value == SvcStatus.notReady
                   ? translate("not_ready_status")
                   : translate('Ready'),
-      style: TextStyle(fontSize: em),
+      style: TextStyle(fontSize: em, color: widget.foregroundColor),
     );
   }
 

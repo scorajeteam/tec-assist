@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/tec_assist_brand.dart';
 // original cm window in Sciter version.
 
 import 'dart:async';
@@ -346,6 +347,22 @@ class ConnectionManagerState extends State<ConnectionManager>
 }
 
 Widget buildConnectionCard(Client client) {
+  if (tecAssistStandalone && !client.authorized && !client.disconnected) {
+    return Consumer<ServerModel>(builder: (context, value, child) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: SingleChildScrollView(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _CmHeader(client: client),
+            if (client.type_() == ClientType.remote || client.type_() == ClientType.camera) _PrivilegeBoard(client: client),
+          ],
+        ))),
+        const Divider(height: 1),
+        _CmControlPanel(client: client),
+      ],
+    ).paddingSymmetric(vertical: 4.0, horizontal: 8.0));
+  }
   return Consumer<ServerModel>(
     builder: (context, value, child) => Column(
       mainAxisAlignment: MainAxisAlignment.start,
@@ -462,7 +479,9 @@ class _CmHeaderState extends State<_CmHeader>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
+          if (tecAssistStandalone)
+            Image.asset('assets/tec_assist_logo.png', width: 70, height: 70, fit: BoxFit.contain).marginOnly(right: 10)
+          else Container(
             width: 70,
             height: 70,
             alignment: Alignment.center,
@@ -484,7 +503,12 @@ class _CmHeaderState extends State<_CmHeader>
               mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                FittedBox(
+                if (tecAssistStandalone) Text(
+                  client.disconnected ? 'Sessione terminata' : (client.authorized
+                    ? '${tecAssistShortName(client.name)} si è collegato'
+                    : '${client.name.trim().isEmpty ? "Tecnico" : client.name} richiede di collegarsi'),
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                ) else FittedBox(
                     child: Text(
                   client.name,
                   style: TextStyle(
@@ -1013,14 +1037,20 @@ class _CmControlPanel extends StatelessWidget {
         model.showElevation &&
         client.type_() == ClientType.remote;
     final showAccept = model.approveMode != 'password';
+    final acceptAndElevateOnly = tecAssistStandalone && client.type_() == ClientType.remote;
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
+        if (acceptAndElevateOnly)
+          const Padding(padding: EdgeInsets.only(bottom: 16),
+            child: Text('Password verificata. Scegli Accetta ed eleva oppure Rifiuta.',
+              style: TextStyle(fontSize: 14, height: 1.4))),
         Offstage(
-          offstage: !showElevation || !showAccept,
+          offstage: !(showElevation || acceptAndElevateOnly) || !showAccept,
           child: buildButton(context, color: Colors.green[700], onClick: () {
             handleAccept(context);
-            handleElevate(context);
+            if (showElevation || (acceptAndElevateOnly && canElevate)) handleElevate(context);
             windowManager.minimize();
           },
               text: 'Accept and Elevate',
@@ -1035,7 +1065,7 @@ class _CmControlPanel extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (showAccept)
+            if (showAccept && !acceptAndElevateOnly)
               Expanded(
                 child: Column(
                   children: [
@@ -1058,7 +1088,7 @@ class _CmControlPanel extends StatelessWidget {
                 color: Colors.transparent,
                 border: Border.all(color: Colors.grey),
                 onClick: handleDisconnect,
-                text: 'Cancel',
+                text: tecAssistStandalone ? 'Rifiuta' : 'Cancel',
                 textColor: null,
               ),
             ),

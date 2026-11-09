@@ -1,0 +1,41 @@
+name: Tec Assist Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [tecassist/1.4.4.25]
+permissions:
+  contents: read
+concurrency:
+  group: tecassist-windows-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Checkout public source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: MSVC x64 tools
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: x64
+      - name: Flutter 3.24.5
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+      - name: Prepare and build unsigned Tec Assist
+        shell: pwsh
+        run: |
+          . ./tecassist/setup.ps1
+          ./tecassist/build.ps1
+      - name: Preserve build, checks and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tec-assist-1.4.4.25-unsigned-${{ github.run_number }}
+          path: tecassist-out/
+          if-no-files-found: error
+          retention-days: 14

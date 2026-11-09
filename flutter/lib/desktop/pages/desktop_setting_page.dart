@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter_hbb/tec_assist_brand.dart';
+import 'package:flutter_hbb/tec_assist_about.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -276,6 +278,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    if (tecAssistStandalone) return const Scaffold(body: SafeArea(child: Padding(padding: EdgeInsets.all(20), child: TecAssistAboutContent())));
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: _buildBlock(

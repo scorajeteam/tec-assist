@@ -52,6 +52,8 @@ import 'package:flutter_hbb/generated_bridge.dart'
 import 'package:flutter_hbb/native/custom_cursor.dart'
     if (dart.library.html) 'package:flutter_hbb/web/custom_cursor.dart';
 
+final Map<String, DateTime> _tecAssistPendingReboots = {};
+
 typedef HandleMsgBox = Function(Map<String, dynamic> evt, String id);
 typedef ReconnectHandle = Function(OverlayDialogManager, SessionID, bool);
 final _constSessionId = Uuid().v4obj();
@@ -120,6 +122,10 @@ class FfiModel with ChangeNotifier {
   late VirtualMouseMode virtualMouseMode;
   Timer? _timer;
   var _reconnects = 1;
+  bool _tecAssistAwaitingReboot = false;
+  bool _tecAssistConnectingResume = false;
+  Timer? _tecAssistHandshakeTimer;
+  DateTime? _tecAssistRebootDeadline;
   bool _viewOnly = false;
   bool _showMyCursor = false;
   WeakReference<FFI> parent;
@@ -857,12 +863,60 @@ class FfiModel with ChangeNotifier {
 
   /// Handle the message box event based on [evt] and [id].
   handleMsgBox(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
+    if (evt['type'] == 'tec-assist-reboot-prepared') {
+      _tecAssistPendingReboots[peerId] = DateTime.now().add(const Duration(minutes: 30));
+    }
+    if (_tecAssistPendingReboots.containsKey(peerId)) {
+      _tecAssistAwaitingReboot = true;
+      _tecAssistRebootDeadline = _tecAssistPendingReboots[peerId];
+    }
     if (parent.target == null) return;
     final dialogManager = parent.target!.dialogManager;
     final type = evt['type'];
     final title = evt['title'];
     final text = evt['text'];
     final link = evt['link'];
+    if (type == 'tec-assist-reboot-prepared') {
+      _tecAssistAwaitingReboot = true;
+      _tecAssistRebootDeadline = DateTime.now().add(const Duration(minutes: 30));
+      return;
+    }
+    if (type == 'success') { _tecAssistHandshakeTimer?.cancel(); _tecAssistConnectingResume = false; }
+    if (type == 'tec-assist-resume-ready') {
+      _tecAssistPendingReboots.remove(peerId); _tecAssistHandshakeTimer?.cancel();
+      _tecAssistAwaitingReboot = false; _timer?.cancel(); _reconnects = 1;
+      dialogManager.dismissAll();
+      dialogManager.show((setState, close, context) => CustomAlertDialog(
+        title: const Text('PC2 è pronto'),
+        content: const Text('Il computer remoto è tornato online. Premi Ricollegati per riprendere l’assistenza.'),
+        actions: [
+          dialogButton('Chiudi', isOutline: true, onPressed: () { close(); closeConnection(); }),
+          dialogButton('Ricollegati', icon: const Icon(Icons.refresh), onPressed: () { close(); _tecAssistConnectingResume = true; reconnect(dialogManager, sessionId, false); }),
+        ],
+        onCancel: () { close(); closeConnection(); },
+      ));
+      return;
+    }
+    if (type == 'tec-assist-resume-ended') {
+      _tecAssistPendingReboots.remove(peerId); _tecAssistHandshakeTimer?.cancel(); _tecAssistConnectingResume = false;
+      _tecAssistAwaitingReboot = false; _timer?.cancel(); dialogManager.dismissAll();
+      showMsgBox(sessionId, 'error', title, text, '', false, dialogManager);
+      return;
+    }
+    if (type == 'tec-assist-resume-wait') {
+      _tecAssistAwaitingReboot = true;
+      _tecAssistRebootDeadline ??= DateTime.now().add(const Duration(minutes: 30));
+    }
+    if (_tecAssistAwaitingReboot && (_tecAssistRebootDeadline?.isBefore(DateTime.now()) ?? false)) {
+      _tecAssistAwaitingReboot = false; _timer?.cancel(); dialogManager.dismissAll();
+      showMsgBox(sessionId, 'error', 'Ripresa scaduta', 'Il PC2 non è tornato disponibile entro il tempo previsto. Avvia una nuova assistenza con il cliente.', '', false, dialogManager);
+      return;
+    }
+    if ((_tecAssistAwaitingReboot || _tecAssistConnectingResume) && (type == 'restarting' || type == 'tec-assist-resume-wait' || type == 'relay-hint' || type == 'relay-hint2' || type.contains('error') || type == 're-input-password')) {
+      _reconnects = 3;
+      showMsgBox(sessionId, 'tec-assist-reboot-wait', 'Riavvio in corso', 'Attendo che il PC2 torni online. Ti avviserò quando sarà pronto.', '', true, dialogManager, hasCancel: false);
+      return;
+    }
     if (type == 're-input-password') {
       wrongPasswordDialog(sessionId, dialogManager, type, title, text);
     } else if (type == 'input-2fa') {
@@ -967,6 +1021,14 @@ class FfiModel with ChangeNotifier {
 
   void reconnect(OverlayDialogManager dialogManager, SessionID sessionId,
       bool forceRelay) {
+    _tecAssistHandshakeTimer?.cancel();
+    if (_tecAssistAwaitingReboot || _tecAssistConnectingResume) {
+      _tecAssistHandshakeTimer = Timer(const Duration(seconds: 30), () {
+        _timer?.cancel(); _tecAssistAwaitingReboot = false; _tecAssistConnectingResume = false;
+        _tecAssistPendingReboots.remove(parent.target?.id); dialogManager.dismissAll();
+        showMsgBox(sessionId, 'error', 'Ripresa non completata', 'La verifica della ripresa non si è completata. Raccogli il registro runtime-status.log del PC2 per individuare il passaggio bloccato.', '', false, dialogManager);
+      });
+    }
     bind.sessionReconnect(sessionId: sessionId, forceRelay: forceRelay);
     clearPermissions();
     dialogManager.dismissAll();

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter_hbb/tec_assist_brand.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -1993,18 +1994,20 @@ class _ChatMenuState extends State<_ChatMenu> {
 
   @override
   Widget build(BuildContext context) {
-    if (isWeb) {
-      return buildTextChatButton();
-    } else {
-      return _IconSubmenuButton(
-          tooltip: 'Chat',
-          key: chatButtonKey,
-          svg: 'assets/chat.svg',
-          ffi: widget.ffi,
-          color: _ToolbarTheme.blueColor,
-          hoverColor: _ToolbarTheme.hoverBlueColor,
-          menuChildrenGetter: (_) => [textChat(), voiceCall()]);
-    }
+    if (isWeb) return buildTextChatButton();
+    final menu = _IconSubmenuButton(
+      tooltip: 'Chat', key: chatButtonKey, svg: 'assets/chat.svg', ffi: widget.ffi,
+      color: _ToolbarTheme.blueColor, hoverColor: _ToolbarTheme.hoverBlueColor,
+      menuChildrenGetter: (_) => [textChat(), voiceCall()],
+    );
+    if (tecAssistStandalone) return menu;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      _IconMenuButton(width: 136, tooltip: 'Riavvia e riprendi',
+        icon: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.restart_alt, color: Colors.white, size: 17), SizedBox(width: 5), Text('Riavvia e riprendi', style: TextStyle(color: Colors.white, fontSize: 11))]),
+        color: _ToolbarTheme.blueColor, hoverColor: _ToolbarTheme.hoverBlueColor,
+        onPressed: () => showRestartRemoteDevice(widget.ffi.ffiModel.pi, widget.ffi.id, widget.ffi.sessionId, widget.ffi.dialogManager)),
+      menu,
+    ]);
   }
 
   buildTextChatButton() {

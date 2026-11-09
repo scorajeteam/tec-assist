@@ -29,8 +29,22 @@ macro_rules! my_println{
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    #[cfg(windows)] if let Some(output)=std::env::args().find_map(|a|a.strip_prefix("--tec-resume-selftest=").map(|s|s.to_owned())) {
+        crate::tec_assist_resume::self_test(&output); return None;
+    }
     if !crate::common::global_init() {
         return None;
+    }
+    #[cfg(windows)] {
+        if crate::tec_assist_resume::host() {
+            if std::env::args().any(|x|x == "--tec-resume-broker") {
+                crate::tec_assist_resume::broker(); return None;
+            }
+            if std::env::args().any(|x|x == "--tec-resume-server") {
+                if !crate::tec_assist_resume::restore_password() { return None; }
+                crate::tec_assist_resume::guard();
+            }
+        }
     }
     crate::load_custom_client();
     #[cfg(windows)]
@@ -65,6 +79,7 @@ pub fn core_main() -> Option<Vec<String>> {
             {
                 _is_flutter_invoke_new_connection = true;
             }
+            if arg == "--tec-resume-ui" { continue; }
             if arg == "--elevate" {
                 _is_elevate = true;
             } else if arg == "--run-as-system" {
@@ -138,7 +153,7 @@ pub fn core_main() -> Option<Vec<String>> {
     }
     #[cfg(windows)]
     {
-        _is_quick_support |= !crate::platform::is_installed()
+        _is_quick_support |= !std::env::args().any(|x|x=="--tec-resume-ui") && !crate::platform::is_installed()
             && args.is_empty()
             && (arg_exe.to_lowercase().contains("-qs-")
                 || config::LocalConfig::get_option("pre-elevate-service") == "Y"
@@ -356,7 +371,7 @@ pub fn core_main() -> Option<Vec<String>> {
             log::info!("start --service");
             crate::start_os_service();
             return None;
-        } else if args[0] == "--server" {
+        } else if args[0] == "--server" || args[0] == "--tec-resume-server" {
             log::info!("start --server with user {}", crate::username());
             #[cfg(target_os = "linux")]
             {

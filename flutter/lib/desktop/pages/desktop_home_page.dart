@@ -1,3 +1,7 @@
+import 'package:flutter_hbb/tec_assist_personalize.dart';
+import 'package:flutter_hbb/tec_assist_brand.dart';
+import 'package:flutter_hbb/tec_assist_about.dart';
+import 'package:flutter_hbb/tec_assist_operator.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -54,21 +58,229 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   final RxBool _editHover = false.obs;
   final RxBool _block = false.obs;
 
+  bool _tecEndingAssistance = false;
+
+  Future<void> _tecAssistEndAssistance() async {
+    if (_tecEndingAssistance) return;
+    setState(() => _tecEndingAssistance = true);
+    try {
+      final result = await bind.tecAssistEndAssistance();
+      if (result == 'closing' || !mounted) return;
+      setState(() => _tecEndingAssistance = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _tecEndingAssistance = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Chiusura non completata. Chiudi lo Standalone dal pulsante della finestra.')));
+    }
+  }
+
+  Widget _tecAssistEndPanel() => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
+    child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(backgroundColor: const Color(0xFFB7333D), foregroundColor: Colors.white,
+        side: const BorderSide(color: Color(0xFFB7333D))),
+      onPressed: _tecEndingAssistance ? null : _tecAssistEndAssistance,
+      icon: const Icon(Icons.power_settings_new),
+      label: Text(_tecEndingAssistance ? 'Chiusura in corso...' : 'Termina assistenza'),
+    )),
+  );
+  bool _tecAdminPending = false;
+  bool _tecAdminActive = false;
+  String _tecAdminMessage = '';
+  DateTime? _tecAdminDeadline;
+
+  Future<void> _tecAssistRequestAdmin() async {
+    if (_tecAdminPending || _tecAdminActive || !isWindows) return;
+    setState(() {
+      _tecAdminPending = true;
+      _tecAdminMessage = 'Approva la richiesta di Windows sul computer assistito.';
+      _tecAdminDeadline = DateTime.now().add(const Duration(seconds: 60));
+    });
+    try {
+      final result = await bind.tecAssistRequestElevation();
+      if (!mounted) return;
+      if (result != 'requested' && result != 'active') {
+        setState(() {
+          _tecAdminPending = false;
+          _tecAdminDeadline = null;
+          _tecAdminMessage = result.startsWith('error: ') ? result.substring(7) : result;
+        });
+      }
+      _tecAssistRefreshAdmin();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _tecAdminPending = false;
+        _tecAdminDeadline = null;
+        _tecAdminMessage = 'Richiesta non completata. Puoi riprovare.';
+      });
+    }
+  }
+
+  void _tecAssistRefreshAdmin() {
+    if (!mounted || !tecAssistStandalone || !isWindows) return;
+    final active = bind.tecAssistElevationActive();
+    final expired = _tecAdminPending && _tecAdminDeadline != null && DateTime.now().isAfter(_tecAdminDeadline!);
+    if (active == _tecAdminActive && !expired && !(active && _tecAdminPending)) return;
+    setState(() {
+      _tecAdminActive = active;
+      if (active) {
+        _tecAdminPending = false;
+        _tecAdminDeadline = null;
+        _tecAdminMessage = 'Supporto amministrativo attivo.';
+      } else if (expired) {
+        _tecAdminPending = false;
+        _tecAdminDeadline = null;
+        _tecAdminMessage = 'Privilegi non attivati: richiesta annullata o non completata. Puoi riprovare.';
+      } else {
+        _tecAdminMessage = 'Supporto amministrativo non attivo.';
+      }
+    });
+  }
+
+  Widget _tecAssistAdminPanel() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      OutlinedButton.icon(
+        onPressed: _tecAdminPending || _tecAdminActive ? null : _tecAssistRequestAdmin,
+        icon: Icon(_tecAdminActive ? Icons.verified_user : Icons.admin_panel_settings_outlined),
+        label: Text(_tecAdminActive ? 'Privilegi amministrativi attivi' : _tecAdminPending ? 'In attesa di Windows...' : 'Privilegi amministrativi'),
+      ),
+      const SizedBox(height: 6),
+      Text(_tecAdminMessage.isEmpty
+        ? 'Usa questo pulsante se il tecnico deve intervenire su finestre o programmi amministrativi. Windows richiedera la tua approvazione.'
+        : _tecAdminMessage,
+        style: const TextStyle(fontSize: 12, color: Color(0xFF33465F), height: 1.4)),
+      const SizedBox(height: 16),
+    ]),
+  );
+
   final GlobalKey _childKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final isIncomingOnly = bind.isIncomingOnly();
     return _buildBlock(
-        child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        buildLeftPane(context),
-        if (!isIncomingOnly) const VerticalDivider(width: 1),
-        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
+      child: tecAssistStandalone
+          ? _tecAssistStandaloneSurface(context)
+          : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              SizedBox(width: 220, child: ColoredBox(
+                color: const Color(0xFFF0F3F8),
+                child: Column(children: [Expanded(child: SingleChildScrollView(child: Column(children: [
+                  tecConsolePersonalHeader(),
+                  tecAssistOperatorPanel(),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: Text('Collegati al computer del cliente usando il suo ID e la password temporanea.',
+                      textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF33465F), height: 1.5))),
+                  const SizedBox(height: 20),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: OutlinedButton.icon(onPressed: () => showTecConsolePersonalize(context),
+                      icon: const Icon(Icons.palette_outlined, size: 18), label: const Text('Personalizza'))),
+                  const SizedBox(height: 20),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 18), child: Text(
+                    '© 2026 ideatore Luca Tecchio', textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11, color: Color(0xFF596579), height: 1.5))),
+                  const SizedBox(height: 6),
+                  _tecAssistInformationButton(),
+
+                ]))),
+                  SizedBox(height: 88, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(backgroundColor: const Color(0xFFB7333D), foregroundColor: Colors.white,
+                        side: const BorderSide(color: Color(0xFFB7333D))),
+                      onPressed: _tecAssistQuitConsole,
+                      icon: const Icon(Icons.power_settings_new, size: 18),
+                      label: const Text('Termina programma', style: TextStyle(fontSize: 12)),
+                    ))))),
+                ]),
+              )),
+              const VerticalDivider(width: 1),
+              Expanded(child: Column(children: [
+                if (systemError.isNotEmpty) MaterialBanner(
+                  content: Text(systemError), actions: [TextButton(
+                    onPressed: () => DesktopTabPage.onAddSetting(initialPage: SettingsTabKey.network),
+                    child: const Text('Impostazioni di rete'))]),
+                Expanded(child: buildRightPane(context)),
+              ])),
+            ]),
+    );
+  }
+
+  bool _tecConsoleQuitting = false;
+  Future<void> _tecAssistQuitConsole() async {
+    if (_tecConsoleQuitting) return;
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Terminare Tec Assist Console?'),
+      content: const Text('La Console verrà chiusa e le eventuali sessioni di assistenza saranno interrotte.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Annulla')),
+        ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB7333D), foregroundColor: Colors.white),
+          onPressed: () => Navigator.pop(dialogContext, true), icon: const Icon(Icons.power_settings_new),
+          label: const Text('Termina programma')),
       ],
     ));
+    if (confirmed != true) return;
+    _tecConsoleQuitting = true;
+    try {
+      await rustDeskWinManager.closeAllSubWindows();
+      await SystemNavigator.pop();
+      if (isWindows) exit(0);
+    } catch (_) {
+      _tecConsoleQuitting = false;
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chiusura non completata. Riprova.')));
+    }
+  }
+
+  Widget _tecAssistInformationButton() => TextButton.icon(
+    onPressed: () => DesktopTabPage.onAddSetting(initialPage: SettingsTabKey.about),
+    icon: const Icon(Icons.info_outline, size: 18),
+    label: const Text('Informazioni e licenze'),
+  );
+
+  Widget _tecAssistStandaloneSurface(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: ColoredBox(
+        color: const Color(0xFFF0F3F8),
+        child: Column(children: [
+          Expanded(child: Scrollbar(
+            controller: _leftPaneScrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _leftPaneScrollController,
+              child: Center(child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Consumer<ServerModel>(builder: (_, model, __) => tecAssistBrandHeader(connectedNames: model.tecAssistConnectedNames)),
+                  const Padding(padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
+                    child: Text('Assistenza sul tuo computer', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF172B49)))),
+                  const Padding(padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: Text('Comunica al tecnico ID e password temporanea. Approva la richiesta per iniziare l’assistenza.', style: TextStyle(height: 1.4, color: Color(0xFF33465F)))),
+                  const SizedBox(height: 14),
+                  Card(margin: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Padding(padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Column(children: [buildIDBoard(context), const SizedBox(height: 12), buildPasswordBoard(context)]))),
+                  const SizedBox(height: 14),
+                  if (systemError.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(horizontal: 24), child: Text(systemError, style: const TextStyle(color: Colors.red))),
+                  _tecAssistEndPanel(),
+                  const SizedBox(height: 8),
+                ]),
+              )),
+            ),
+          )),
+          const Divider(height: 1),
+          ColoredBox(color: Colors.white, child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              SizedBox(width: 130, child: OnlineStatusWidget(onSvcStatusChanged: () {}, foregroundColor: const Color(0xFF263238))),
+              const Expanded(child: Padding(padding: EdgeInsets.only(right: 10), child: Text("© 2026 ideatore Luca Tecchio", textAlign: TextAlign.right, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: Color(0xFF596579))))),
+              IconButton(tooltip: 'Informazioni e licenze', constraints: const BoxConstraints(minWidth: 28, minHeight: 40), padding: EdgeInsets.zero, onPressed: () => showTecAssistAbout(context), icon: const Icon(Icons.info_outline, size: 18, color: Color(0xFF596579))),
+            ]),
+          ]))),
+        ]),
+      ),
+    );
   }
 
   Widget _buildBlock({required Widget child}) {
@@ -77,7 +289,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildLeftPane(BuildContext context) {
-    final isIncomingOnly = bind.isIncomingOnly();
+    final isIncomingOnly = tecAssistStandalone || bind.isIncomingOnly();
     final isOutgoingOnly = bind.isOutgoingOnly();
     final children = <Widget>[
       if (!isOutgoingOnly) buildPresetPasswordWarning(),
@@ -88,7 +300,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         ),
       Align(
         alignment: Alignment.center,
-        child: loadLogo(),
+        child: tecAssistBrandHeader(),
       ),
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
@@ -256,6 +468,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildPopupMenu(BuildContext context) {
+    if (tecAssistStandalone) return const SizedBox.shrink();
     final textColor = Theme.of(context).textTheme.titleLarge?.color;
     RxBool hover = false.obs;
     return InkWell(
@@ -338,7 +551,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                               contentPadding:
                                   EdgeInsets.only(top: 14, bottom: 10),
                             ),
-                            style: TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                           ).workaroundFreezeLinuxMint(),
                         ),
                       ),
@@ -695,6 +908,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     super.initState();
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
+      _tecAssistRefreshAdmin();
       final error = await bind.mainGetError();
       if (systemError != error) {
         systemError = error;

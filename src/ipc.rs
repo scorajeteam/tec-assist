@@ -188,6 +188,8 @@ pub enum DataPortableService {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "t", content = "c")]
 pub enum Data {
+    TecAssistElevationDecision(bool),
+    TecAssistRebootPrepared(String),
     Login {
         id: i32,
         is_file_transfer: bool,

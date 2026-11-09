@@ -1738,6 +1738,7 @@ pub struct LoginConfigHandler {
     pub session_id: u64, // used for local <-> server communication
     pub supported_encoding: SupportedEncoding,
     pub restarting_remote_device: bool,
+    pub tec_assist_probe_complete: bool,
     pub force_relay: bool,
     pub direct: Option<bool>,
     pub received: bool,
@@ -1844,6 +1845,7 @@ impl LoginConfigHandler {
         self.session_id = sid;
         self.supported_encoding = Default::default();
         self.restarting_remote_device = false;
+        self.tec_assist_probe_complete = false;
         self.force_relay =
             config::option2bool("force-always-relay", &self.get_option("force-always-relay"))
                 || force_relay
@@ -2625,7 +2627,7 @@ impl LoginConfigHandler {
         } else {
             (my_id, self.id.clone())
         };
-        let mut display_name = get_builtin_option(keys::OPTION_DISPLAY_NAME);
+        let mut display_name = if crate::get_app_name() == "TecAssistConsole" { format!("{} — Tec Assist", { let name = LocalConfig::get_option("tec-assist-operator-name"); if name.trim().is_empty() { "Operatore non selezionato".to_owned() } else { name.trim().to_owned() } }) } else { get_builtin_option(keys::OPTION_DISPLAY_NAME) };
         if display_name.is_empty() {
             display_name =
                 serde_json::from_str::<serde_json::Value>(&LocalConfig::get_option("user_info"))
@@ -2665,14 +2667,31 @@ impl LoginConfigHandler {
         } else {
             Bytes::new()
         };
+        #[cfg(windows)] crate::tec_assist_resume::stage("client-login-frame-begin");
+        #[cfg(windows)] let (resume_session, resume_proof) = if self.conn_type == ConnType::DEFAULT_CONN {
+            crate::tec_assist_resume::credentials(&self.id,self.session_id,&self.hash)
+        }else if self.conn_type == ConnType::FILE_TRANSFER {
+            crate::tec_assist_resume::file_credentials(&self.id,self.session_id,&self.hash)
+        }else{(self.session_id,Vec::new())};
+        #[cfg(not(windows))] let resume_session=self.session_id;
+        #[cfg(windows)] let resume_probe=self.conn_type == ConnType::DEFAULT_CONN && !resume_proof.is_empty()&&!self.tec_assist_probe_complete;
+        #[cfg(not(windows))] let resume_probe=false;
+        let login_options=if resume_probe {None}else{
+            #[cfg(windows)] crate::tec_assist_resume::stage("client-login-metadata-begin");
+            let value=self.get_option_message(true);
+            #[cfg(windows)] crate::tec_assist_resume::stage("client-login-metadata-end");
+            value
+        };
         let mut lr = LoginRequest {
+            #[cfg(windows)] tec_assist_resume_probe: resume_probe,
+            #[cfg(windows)] tec_assist_resume_proof: resume_proof.into(),
             username: pure_id,
             password: password.into(),
             my_id,
             my_name: display_name,
             my_platform,
-            option: self.get_option_message(true).into(),
-            session_id: self.session_id,
+            option: login_options.into(),
+            session_id: resume_session,
             version: crate::VERSION.to_string(),
             os_login: Some(OSLogin {
                 username: os_username,
@@ -2705,6 +2724,7 @@ impl LoginConfigHandler {
 
         let mut msg_out = Message::new();
         msg_out.set_login_request(lr);
+        #[cfg(windows)] crate::tec_assist_resume::stage("client-login-frame-created");
         msg_out
     }
 
@@ -3449,9 +3469,12 @@ pub async fn handle_hash(
     }
 
     let password = if password.is_empty() {
-        // login without password, the remote side can click accept
-        interface.msgbox("input-password", "Password Required", "", "");
-        Vec::new()
+        #[cfg(windows)] let resume = {let config=lc.read().unwrap();(config.conn_type == ConnType::DEFAULT_CONN && crate::tec_assist_resume::has_ticket(&config.id))
+            || (config.conn_type == ConnType::FILE_TRANSFER && !crate::tec_assist_resume::file_credentials(&config.id,config.session_id,&hash).1.is_empty())};
+        #[cfg(not(windows))] let resume = false;
+        if resume { vec![0;32] } else {
+            interface.msgbox("input-password", "Password Required", "", ""); Vec::new()
+        }
     } else {
         let mut hasher = Sha256::new();
         hasher.update(&password);
@@ -3469,8 +3492,8 @@ pub async fn handle_hash(
         )
     };
 
-    send_login(lc.clone(), os_username, os_password, password, peer).await;
     lc.write().unwrap().hash = hash;
+    send_login(lc.clone(), os_username, os_password, password, peer).await;
 }
 
 #[inline]
@@ -3507,6 +3530,21 @@ fn try_get_password_from_personal_ab(lc: Arc<RwLock<LoginConfigHandler>>, passwo
 /// * `os_password` - OS password.
 /// * `password` - Password.
 /// * `peer` - [`Stream`] for communicating with peer.
+#[cfg(windows)]
+pub(crate) fn tec_assist_resume_frame_test(remote:&str, hash:&Hash, original:u64)->bool {
+    let mut config=LoginConfigHandler::default();
+    config.id=remote.to_owned();config.conn_type=ConnType::DEFAULT_CONN;config.session_id=999;config.hash=hash.clone();
+    let config=Arc::new(RwLock::new(config));
+    let first=config.read().unwrap().create_login_msg(String::new(),String::new(),vec![0;32]);
+    let probe=first.login_request();
+    let first_ok=probe.tec_assist_resume_probe&&probe.option.is_none()&&probe.session_id==original&&!probe.tec_assist_resume_proof.is_empty();
+    config.write().unwrap().tec_assist_probe_complete=true;
+    config.write().unwrap().hash.challenge="second-auth-challenge".into();
+    let second=config.read().unwrap().create_login_msg(String::new(),String::new(),vec![0;32]);
+    let auth=second.login_request();
+    first_ok&&!auth.tec_assist_resume_probe&&auth.session_id==original&&auth.tec_assist_resume_proof!=probe.tec_assist_resume_proof
+}
+
 async fn send_login(
     lc: Arc<RwLock<LoginConfigHandler>>,
     os_username: String,
@@ -3518,7 +3556,9 @@ async fn send_login(
         .read()
         .unwrap()
         .create_login_msg(os_username, os_password, password);
+    #[cfg(windows)] crate::tec_assist_resume::stage("client-login-send-begin");
     allow_err!(peer.send(&msg_out).await);
+    #[cfg(windows)] crate::tec_assist_resume::stage("client-login-sent");
 }
 
 /// Handle login request made from ui.
@@ -4174,4 +4214,11 @@ async fn udp_nat_connect(
             anyhow!(err)
         })?;
     Ok((res.1, Some(res.0), typ))
+}
+
+#[cfg(windows)]
+pub(crate) fn tec_assist_file_frame_test(remote:&str,hash:&Hash)->LoginRequest {
+    let mut config=LoginConfigHandler::default();
+    config.id=remote.to_owned();config.conn_type=ConnType::FILE_TRANSFER;config.session_id=999;config.hash=hash.clone();
+    config.create_login_msg(String::new(),String::new(),vec![0;32]).login_request().clone()
 }

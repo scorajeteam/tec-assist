@@ -55,3 +55,7 @@ vcpkg_installed
 flutter/lib/generated_plugin_registrant.dart
 libsciter.dylib
 flutter/web/
+# Tec Assist CI outputs and isolated UI checkout
+/tecassist-out/
+/tecassist-ui/
+/tecassist-deps/

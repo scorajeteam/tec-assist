@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/tec_assist_brand.dart';
 
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -375,6 +376,14 @@ class ChatModel with ChangeNotifier {
     }
     // show chat page
     await showChatPage(messagekey);
+    if (tecAssistStandalone && isConnManager && id != clientModeID) {
+      final client = session.serverModel.clients.firstWhereOrNull((c) => c.id == id);
+      if (client != null && client.authorized && !client.disconnected) {
+        await windowManager.restore();
+        await windowManager.show();
+        await windowManager.focus();
+      }
+    }
     late final ChatUser chatUser;
     if (id == clientModeID) {
       chatUser = ChatUser(

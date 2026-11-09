@@ -1332,7 +1332,7 @@ void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
                       .paddingOnly(left: 10)),
             ]),
             content: Text(
-                "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
+                "Richiedere il riavvio di ${pi.username}@${pi.hostname} ($id)?\n\nIl cliente deve autorizzare la ripresa temporanea. Il riavvio partirÃ  solo dopo la preparazione; potrai ricollegare questa stessa sessione per un massimo di 30 minuti senza una nuova conferma."),
             actions: [
               dialogButton(
                 "Cancel",

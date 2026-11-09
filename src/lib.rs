@@ -1,3 +1,6 @@
+mod tec_assist_consent;
+#[cfg(windows)] mod tec_assist_resume;
+mod tec_assist_elevation;
 mod keyboard;
 /// cbindgen:ignore
 pub mod platform;

@@ -551,6 +551,13 @@ impl<T: InvokeUiSession> Session<T> {
 
     pub fn restart_remote_device(&self) {
         let mut lc = self.lc.write().unwrap();
+        #[cfg(windows)] if crate::get_app_name() == "TecAssistConsole" && !lc.peer_info.as_ref()
+            .and_then(|p|p.features.as_ref()).map(|f|f.tec_assist_resume).unwrap_or(false) {
+            drop(lc);
+            self.msgbox("error", "Tec Assist â€” Riavvio", "Aggiorna lo Standalone sul PC remoto: questa versione non supporta la ripresa temporanea dopo il riavvio.", "");
+            return;
+        }
+        lc.tec_assist_probe_complete = false;
         lc.restarting_remote_device = true;
         let msg = lc.restart_remote_device();
         self.send(Data::Message(msg));

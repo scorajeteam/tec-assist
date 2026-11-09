@@ -713,6 +713,14 @@ pub fn launch_privileged_process(session_id: DWORD, cmd: &str) -> ResultType<HAN
     Ok(h)
 }
 
+pub(crate) fn tec_assist_launch_resume_ui(session_id: DWORD, exe: &str) -> ResultType<HANDLE> {
+    use std::os::windows::ffi::OsStrExt;
+    let command=format!("\"{}\" --tec-resume-ui",exe);
+    let wide:Vec<u16>=std::ffi::OsStr::new(&command).encode_wide().chain(Some(0)).collect();
+    let mut pid=0;
+    let handle=unsafe{LaunchProcessWin(wide.as_ptr(),session_id,TRUE,TRUE,&mut pid)};
+    Ok(handle)
+}
 pub fn run_as_user(arg: Vec<&str>) -> ResultType<Option<std::process::Child>> {
     run_exe_in_cur_session(std::env::current_exe()?.to_str().unwrap_or(""), arg, false)
 }
@@ -771,7 +779,7 @@ pub fn run_exe_in_session(
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn send_close(postfix: &str) -> ResultType<()> {
+pub(crate) async fn send_close(postfix: &str) -> ResultType<()> {
     send_close_async(postfix).await
 }
 
