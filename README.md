@@ -13,7 +13,7 @@ La versione 25 ha superato controlli locali di compilazione e policy; l'utente h
 
 ## Build e licenza
 
-Vedere [istruzioni di compilazione](BUILD.md), [privacy](PRIVACY.md) e [Code signing policy](SIGNING-POLICY.md) nella cartella `tecassist`. Dalla radice del repository i percorsi sono `tecassist/BUILD.md`, `tecassist/PRIVACY.md` e `tecassist/SIGNING-POLICY.md`.
+Vedere [istruzioni di compilazione](tecassist/BUILD.md), [privacy](tecassist/PRIVACY.md) e [Code signing policy](tecassist/SIGNING-POLICY.md) nella cartella `tecassist`. Dalla radice del repository i percorsi sono `tecassist/BUILD.md`, `tecassist/PRIVACY.md` e `tecassist/SIGNING-POLICY.md`.
 
 Licenza del codice derivato: **AGPL-3.0**, con avvisi upstream conservati; vedere `LICENCE`. La titolarità dei componenti di terzi resta ai rispettivi autori. Questa distribuzione non dichiara approvazione o sponsorizzazione da RustDesk.
 
